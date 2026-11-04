@@ -20,35 +20,59 @@ interface TelemetryData {
 }
 
 export default function TelemetryDashboard() {
+  // Dynamic host detection eliminating hardcoded IP failure points
+  const host = typeof window !== 'undefined' ? window.location.hostname : '172.16.1.142';
+  const wsUrl = process.env.NEXT_PUBLIC_TELEMETRY_WS_URL || `ws://${host}:9000/ws/telemetry`;
+  const apiUrl = process.env.NEXT_PUBLIC_TELEMETRY_API_URL || `http://${host}:9000/api/v1`;
+
   const [data, setData] = useState<TelemetryData | null>(null);
   const [connected, setConnected] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string>('');
 
   useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_TELEMETRY_WS_URL || 'ws://172.16.1.142:9000/ws/telemetry';
     let ws: WebSocket;
+    let reconnectAttempts = 0;
+    let reconnectTimer: NodeJS.Timeout;
 
     const connectWS = () => {
-      ws = new WebSocket(wsUrl);
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(event.data);
-          setData(parsed);
-        } catch (err) {}
-      };
-      ws.onclose = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          setConnected(true);
+          reconnectAttempts = 0; // Reset backoff on successful connection
+        };
+        ws.onmessage = (event) => {
+          try {
+            const parsed = JSON.parse(event.data);
+            setData(parsed);
+          } catch (err) {
+            // Silently drop malformed JSON frames to prevent render crashes
+          }
+        };
+        ws.onclose = () => {
+          setConnected(false);
+          // Exponential backoff with jitter: caps at 30 seconds max delay
+          const delay = Math.min(30000, 1000 * Math.pow(1.5, reconnectAttempts)) + Math.random() * 1000;
+          reconnectAttempts++;
+          reconnectTimer = setTimeout(connectWS, delay);
+        };
+        ws.onerror = () => {
+          try { ws.close(); } catch (e) {}
+        };
+      } catch (err) {
         setConnected(false);
-        setTimeout(connectWS, 2000);
-      };
+        reconnectTimer = setTimeout(connectWS, 3000);
+      }
     };
 
     connectWS();
-    return () => ws && ws.close();
-  }, []);
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+    };
+  }, [wsUrl]);
 
   const triggerContainerAction = async (containerName: string, action: string) => {
-    const apiUrl = process.env.NEXT_PUBLIC_TELEMETRY_API_URL || 'http://172.16.1.142:9000/api/v1';
     setActionMessage(`Executing ${action} on container ${containerName}...`);
     try {
       const res = await fetch(`${apiUrl}/control/container`, {
@@ -64,7 +88,6 @@ export default function TelemetryDashboard() {
   };
 
   const triggerSystemdAction = async (serviceName: string, action: string) => {
-    const apiUrl = process.env.NEXT_PUBLIC_TELEMETRY_API_URL || 'http://172.16.1.142:9000/api/v1';
     setActionMessage(`Executing ${action} on service ${serviceName}...`);
     try {
       const res = await fetch(`${apiUrl}/control/systemd`, {
@@ -86,7 +109,7 @@ export default function TelemetryDashboard() {
           <Activity className="w-8 h-8 text-accentCyan animate-pulse" />
           <div>
             <h1 className="text-xl font-bold tracking-wider text-white">HEXADATA OMNISIGHT MASTER CONTROL ROOM</h1>
-            <p className="text-xs text-gray-400">Node IP: 172.16.1.142 | Host: {data?.host.hostname || 'Detecting...'}</p>
+            <p className="text-xs text-gray-400">Node IP: {host} | Host: {data?.host.hostname || 'Detecting...'}</p>
           </div>
         </div>
         <div className="flex items-center space-x-4">

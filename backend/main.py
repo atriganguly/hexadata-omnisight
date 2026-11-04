@@ -126,7 +126,7 @@ async def fetch_docker_telemetry() -> List[Dict[str, Any]]:
 
 async def fetch_ai_runtime_telemetry() -> Dict[str, Any]:
     url_slots = f"http://{LLAMA_SERVER_HOST}:{LLAMA_SERVER_PORT}/slots"
-    url_health = f"http://{LLAMA_SERVER_HOST}:{LLAMA_SERVER_PORT}/health"
+    url_health = f"http://{LLMM_SERVER_HOST if 'LLMM_SERVER_HOST' in globals() else LLAMA_SERVER_HOST}:{LLAMA_SERVER_PORT}/health"
     
     ai_state = {
         "status": "offline",
@@ -137,25 +137,32 @@ async def fetch_ai_runtime_telemetry() -> Dict[str, Any]:
     }
     
     try:
-        async with httpx.AsyncClient(timeout=1.5) as client:
-            h_res = await client.get(url_health)
-            if h_res.status_code == 200:
-                ai_state["status"] = "online"
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            try:
+                h_res = await client.get(f"http://{LLAMA_SERVER_HOST}:{LLAMA_SERVER_PORT}/health")
+                if h_res.status_code == 200:
+                    ai_state["status"] = "online"
+            except Exception:
+                pass
                 
-            s_res = await client.get(url_slots)
-            if s_res.status_code == 200:
-                slots_data = s_res.json()
-                ai_state["total_slots"] = len(slots_data)
-                ai_state["active_slots"] = sum(1 for s in slots_data if s.get("is_processing", False))
-                ai_state["slots"] = [
-                    {
-                        "id": s.get("id"),
-                        "is_processing": s.get("is_processing", False),
-                        "n_decoded": s.get("n_decoded", 0),
-                        "n_prompt": s.get("n_prompt", 0)
-                    }
-                    for s in slots_data
-                ]
+            try:
+                s_res = await client.get(url_slots)
+                if s_res.status_code == 200:
+                    slots_data = s_res.json()
+                    if isinstance(slots_data, list):
+                        ai_state["total_slots"] = len(slots_data)
+                        ai_state["active_slots"] = sum(1 for s in slots_data if isinstance(s, dict) and s.get("is_processing", False))
+                        ai_state["slots"] = [
+                            {
+                                "id": s.get("id"),
+                                "is_processing": s.get("is_processing", False),
+                                "n_decoded": s.get("n_decoded", 0),
+                                "n_prompt": s.get("n_prompt", 0)
+                            }
+                            for s in slots_data if isinstance(s, dict)
+                        ]
+            except Exception:
+                pass
     except Exception:
         ai_state["status"] = "offline"
         
