@@ -1,0 +1,25 @@
+name: Deploy HexaData OmniSight Telemetry Suite
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Sync Code Base to Production Path
+        run: |
+          mkdir -p /root/hexadata-omnisight
+          rsync -avz --delete ./ /root/hexadata-omnisight/
+
+      - name: Build & Deploy Telemetry Stack
+        run: |
+          cd /root/hexadata-omnisight
+          chmod +x run.sh
+          ./run.sh build
+          ./run.sh start
