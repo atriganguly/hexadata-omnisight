@@ -29,9 +29,12 @@ WATCHDOG_LOG = os.getenv("WATCHDOG_LOG", "/var/log/llama-watchdog.log")
 
 def get_docker_client():
     try:
-        return docker.DockerClient(base_url="unix://var/run/docker.sock")
+        return docker.from_env()
     except Exception:
-        return None
+        try:
+            return docker.DockerClient(base_url="unix:///var/run/docker.sock")
+        except Exception:
+            return None
 
 class ContainerActionReq(BaseModel):
     container_name: str
